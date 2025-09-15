@@ -12,11 +12,12 @@ Classes:
     BaseSampler: Template for custom samplers, e.g., for multimodal sampling.
 """
 
-from load_data.echo import load_echo_dicom, load_mimic_iv_echo_record_list
 from torch.utils.data import Dataset, Sampler
 from torch_geometric.data import DataLoader
 
-from load_data.ecg import load_mimic_iv_ecg_record_list, load_ecg_record
+from .load_data.ecg import load_ecg_record, load_mimic_iv_ecg_record_list
+from .load_data.echo import load_echo_dicom, load_mimic_iv_echo_record_list
+
 __all__ = ["BaseDataset", "BaseDataLoader", "BaseSampler"]
 
 
@@ -112,13 +113,20 @@ class ECGDataset(BaseDataset):
         super().__init__(*args, **kwargs)
         # Loading the ECG data (records contains patient id, hea path) in df frame
         self.records = load_mimic_iv_ecg_record_list(args.data_path)
-        self.subject_ids = self.records['subject_id'].tolist()
+        self.subject_ids = self.records["subject_id"].tolist()
 
-    def __getitem__(self, idx: int):
-        """Return a single sample from the dataset."""
-        record_idx = self.records[idx]
-        signals, fields = load_ecg_record(record_idx["hea_path"])
-        return {'signals': signals, 'fields': fields, 'subject_id': record_idx['subject_id']}
+    def __getitem__(self, sample_ID: int):
+        """Return samples for one sampleID from the dataset."""
+        # record_idx = self.records[idx]
+        # signals, fields = load_ecg_record(record_idx["hea_path"])
+        # return {"signals": signals, "fields": fields, "subject_id": record_idx["subject_id"]}
+        record_idx = self.records[self.records.subject_id == sample_ID]
+        samples = []
+        for idx in record_idx:
+            signals, fields = load_ecg_record(idx["hea_path"])
+            item = {"signals": signals, "fields": fields, "subject_id": record_idx["subject_id"]}
+            samples.append(item)
+        return samples
 
     def __repr__(self) -> str:
         """Return a string representation of the dataset."""
@@ -128,9 +136,13 @@ class ECGDataset(BaseDataset):
         """Return any extra information about the dataset."""
         return f"sample_size={len(self.subject_ids)}"
 
+    def modality(self) -> str:
+        """Return the modality of the dataset."""
+        return "ECG"
+
     def __add__(self, other):
         """
-        Combine with another dataset.
+        Combine with another dataset. Assume other is a single sample.
 
         Override in subclasses to implement multimodal aggregation.
 
@@ -142,8 +154,12 @@ class ECGDataset(BaseDataset):
             dataset, keeping shared IDs synchronized.
             Note: This is not mandatory; treat it as a sketch you can refine or replace.
         """
-        self.records = self.records.merge(other.records, on='subject_id', suffixes=('', '_other'), how='outer')
-        self.subject_ids = self.records['subject_id'].tolist()
+        self.records = self.records.merge(other.records, on="subject_id", suffixes=("", "_other"), how="outer")
+        self.subject_ids = self.records["subject_id"].tolist()
+
+        # TODO: takes a single sample from other, find corresponding sample in this dataset?
+        # i.e. find idx where sample_id matches from other and call get_item on all of those indices?
+
         return self
 
 
@@ -159,21 +175,28 @@ class EchoDataset(BaseDataset):
         """Return the number of samples in the dataset."""
         return len(self.records)
 
-    def __getitem__(self, idx: int):
+    def __getitem__(self, sample_ID: int):
         """Return a single sample from the dataset."""
-        record = self.records.iloc[idx]
-        # Load and return the ECHO data for the given record
-        # print(f"Loading first ECHO DICOM from: {records.iloc[0]['echo_path']}")
-        sample_path = record["echo_path"]
-        frames, meta = load_echo_dicom(sample_path)
-        # meta_filtered = {
-        #    k: meta[k] for k in ("NumberOfFrames", "Rows", "Columns", "FrameTime", "CineRate") if k in meta
-        # }
-        return {"frames": frames, "metadata": meta, "subject_id": record["subject_id"]}
+        # record = self.records.iloc[idx]
+        # sample_path = record["echo_path"]
+        # frames, meta = load_echo_dicom(sample_path)
+        # return {"frames": frames, "metadata": meta, "subject_id": record["subject_id"]}
+        record_idx = self.records[self.records.subject_id == sample_ID]
+        samples = []
+        for idx in record_idx:
+            sample_path = idx["echo_path"]
+            frames, meta = load_echo_dicom(sample_path)
+            item = {"frames": frames, "metadata": meta, "subject_id": idx["subject_id"]}
+            samples.append(item)
+        return samples
 
     def extra_repr(self) -> str:
         """Return any extra information about the dataset."""
         return f"sample_size={len(self)}, subjects={len(set(self.subject_ids))}"
+
+    def modality(self) -> str:
+        """Return the modality of the dataset."""
+        return "echo"
 
     def __add__(self, other):
         """
@@ -200,15 +223,19 @@ class MultimodalDataset(BaseDataset):
     def __init__(self, datasets: list[BaseDataset], *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.datasets = datasets
-        _dataset = datasets[0]
-        if not isinstance(_dataset, BaseDataset):
-            raise ValueError("All elements in datasets must be instances of BaseDataset.")
-        if len(datasets) > 1:
-            for ds in datasets[1:]:
-                if not isinstance(ds, BaseDataset):
-                    raise ValueError("All elements in datasets must be instances of BaseDataset.")
-                _dataset.__add__(ds)
-        self.dataset = _dataset
+        # _dataset = datasets[0]
+        # if not isinstance(_dataset, BaseDataset):
+        #    raise ValueError("All elements in datasets must be instances of BaseDataset.")
+        # if len(datasets) > 1:
+        #    for ds in datasets[1:]:
+        #        if not isinstance(ds, BaseDataset):
+        #            raise ValueError("All elements in datasets must be instances of BaseDataset.")
+        #        _dataset.__add__(ds)
+        # self.dataset = _dataset
+
+        # get union of all subject IDs in each dataset
+        self.subject_ids = list(set().union(*(ds.subject_ids for ds in datasets)))
+        print(f"MultimodalDataset initialized with {len(self.subject_ids)} unique subjects.")
 
     def __len__(self) -> int:
         """Return the number of samples in the dataset."""
@@ -216,7 +243,25 @@ class MultimodalDataset(BaseDataset):
 
     def __getitem__(self, idx: int):
         """Return a single sample from the dataset."""
-        return self.dataset.__getitem__(idx)
+        subject_ID = self.subject_ids[idx]
+        results = {}
+        for dataset in self.datasets:
+            items = dataset.__getitem__(subject_ID)
+            results[dataset.modality()] = items
+        return results
+
+        # get dictionaries for each dataset
+        # results = {}
+        # for ds in self.datasets:
+        #    dict_result = ds.__getitem__(idx) # TODO: assumes idx is same for each sample. replace idx with sample ID
+        #    results[ds.modality()] = dict_result
+
+        # or primary dataset and __add__ in others
+        # primary_ds = self.datasets[0]
+        # item = primary_ds.__getitem__(idx)
+        # for ds in self.datasets[1:]:
+        #    items = ds.__add__(item)
+        # return results
 
     def extra_repr(self) -> str:
         """Return any extra information about the dataset."""
