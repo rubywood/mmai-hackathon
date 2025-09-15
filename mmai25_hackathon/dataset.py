@@ -17,6 +17,7 @@ from torch_geometric.data import DataLoader
 
 from .load_data.ecg import load_ecg_record, load_mimic_iv_ecg_record_list
 from .load_data.echo import load_echo_dicom, load_mimic_iv_echo_record_list
+from .load_data.cxr import load_chest_xray_image, load_mimic_cxr_metadata
 
 __all__ = ["BaseDataset", "BaseDataLoader", "BaseSampler"]
 
@@ -104,6 +105,25 @@ class CXRDataset(BaseDataset):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.records = load_mimic_cxr_metadata(args.data_path)
+        self.subject_ids = self.records["subject_id"].tolist()
+
+    def __len__(self):
+        return len(self.records)
+
+    def __getitem__(self, sample_ID: int):
+        record_idx = self.records[self.records.subject_id == sample_ID]
+        samples = []
+        for idx in record_idx:
+            path = idx["cxr_path"]
+            image = load_chest_xray_image(path)
+            item = {"image": image, "subject_id": record_idx["subject_id"]}
+            samples.append(item)
+        return samples
+    
+    def modality(self) -> str:
+        """Return the modality of the dataset."""
+        return "CXR"
 
 
 class ECGDataset(BaseDataset):
@@ -114,6 +134,9 @@ class ECGDataset(BaseDataset):
         # Loading the ECG data (records contains patient id, hea path) in df frame
         self.records = load_mimic_iv_ecg_record_list(args.data_path)
         self.subject_ids = self.records["subject_id"].tolist()
+
+    def __len__(self):
+        return len(self.records)
 
     def __getitem__(self, sample_ID: int):
         """Return samples for one sampleID from the dataset."""
