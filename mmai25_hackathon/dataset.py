@@ -12,7 +12,7 @@ Classes:
     BaseSampler: Template for custom samplers, e.g., for multimodal sampling.
 """
 
-from load_data.echo import load_echo_dicom, load_mimic_iv_echo_record_list
+from .load_data.echo import load_echo_dicom, load_mimic_iv_echo_record_list
 from torch.utils.data import Dataset, Sampler
 from torch_geometric.data import DataLoader
 
