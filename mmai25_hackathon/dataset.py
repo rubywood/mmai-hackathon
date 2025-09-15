@@ -16,6 +16,7 @@ from torch.utils.data import Dataset, Sampler
 from torch_geometric.data import DataLoader
 from load_data.echo import load_echo_dicom, load_mimic_iv_echo_record_list
 
+from load_data.ecg import load_mimic_iv_ecg_record_list, load_ecg_record
 __all__ = ["BaseDataset", "BaseDataLoader", "BaseSampler"]
 
 
@@ -109,11 +110,46 @@ class ECGDataset(BaseDataset):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        # Loading the ECG data (records contains patient id, hea path) in df frame
+        self.records = load_mimic_iv_ecg_record_list(args.data_path)
+        self.subject_ids = self.records['subject_id'].tolist()
+
+    def __getitem__(self, idx: int):
+        """Return a single sample from the dataset."""
+        record_idx = self.records[idx]
+        signals, fields = load_ecg_record(record_idx["hea_path"])
+        return {'signals': signals, 'fields': fields, 'subject_id': record_idx['subject_id']}
+
+    def __repr__(self) -> str:
+        """Return a string representation of the dataset."""
+        return f"{self.__class__.__name__}({self.extra_repr()})"
+
+    def extra_repr(self) -> str:
+        """Return any extra information about the dataset."""
+        return f"sample_size={len(self.subject_ids)}"
+
+    def __add__(self, other):
+        """
+        Combine with another dataset.
+
+        Override in subclasses to implement multimodal aggregation.
+
+        Args:
+            other: Another dataset to combine with this one.
+
+        Initial Idea:
+            Use `__add__` to align and merge heterogeneous modalities into a single
+            dataset, keeping shared IDs synchronized.
+            Note: This is not mandatory; treat it as a sketch you can refine or replace.
+        """
+        self.records = self.records.merge(other.records, on='subject_id', suffixes=('', '_other'), how='outer')
+        self.subject_ids = self.records['subject_id'].tolist()
+        return self
 
 
 class EchoDataset(BaseDataset):
     """Example subclass for an ECHO dataset."""
-    
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.records = load_mimic_iv_echo_record_list(args.data_path)
@@ -122,7 +158,7 @@ class EchoDataset(BaseDataset):
     def __len__(self) -> int:
         """Return the number of samples in the dataset."""
         return len(self.records)
-    
+
     def __getitem__(self, idx: int):
         """Return a single sample from the dataset."""
         record = self.records[idx]
@@ -134,7 +170,7 @@ class EchoDataset(BaseDataset):
         #    k: meta[k] for k in ("NumberOfFrames", "Rows", "Columns", "FrameTime", "CineRate") if k in meta
         #}
         return {'frames': frames, 'metadata': meta, 'subject_id': record['subject_id']}
-    
+
     def extra_repr(self) -> str:
         """Return any extra information about the dataset."""
         return f"sample_size={len(self)}, subjects={len(set(self.subject_ids))}"
