@@ -12,9 +12,9 @@ Classes:
     BaseSampler: Template for custom samplers, e.g., for multimodal sampling.
 """
 
+from load_data.echo import load_echo_dicom, load_mimic_iv_echo_record_list
 from torch.utils.data import Dataset, Sampler
 from torch_geometric.data import DataLoader
-from load_data.echo import load_echo_dicom, load_mimic_iv_echo_record_list
 
 __all__ = ["BaseDataset", "BaseDataLoader", "BaseSampler"]
 
@@ -113,28 +113,28 @@ class ECGDataset(BaseDataset):
 
 class EchoDataset(BaseDataset):
     """Example subclass for an ECHO dataset."""
-    
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.records = load_mimic_iv_echo_record_list(args.data_path)
-        self.subject_ids = self.records['subject_id'].tolist()
+        self.subject_ids = self.records["subject_id"].tolist()
 
     def __len__(self) -> int:
         """Return the number of samples in the dataset."""
         return len(self.records)
-    
+
     def __getitem__(self, idx: int):
         """Return a single sample from the dataset."""
-        record = self.records[idx]
+        record = self.records.iloc[idx]
         # Load and return the ECHO data for the given record
-        #print(f"Loading first ECHO DICOM from: {records.iloc[0]['echo_path']}")
+        # print(f"Loading first ECHO DICOM from: {records.iloc[0]['echo_path']}")
         sample_path = record["echo_path"]
         frames, meta = load_echo_dicom(sample_path)
-        #meta_filtered = {
+        # meta_filtered = {
         #    k: meta[k] for k in ("NumberOfFrames", "Rows", "Columns", "FrameTime", "CineRate") if k in meta
-        #}
-        return {'frames': frames, 'metadata': meta, 'subject_id': record['subject_id']}
-    
+        # }
+        return {"frames": frames, "metadata": meta, "subject_id": record["subject_id"]}
+
     def extra_repr(self) -> str:
         """Return any extra information about the dataset."""
         return f"sample_size={len(self)}, subjects={len(set(self.subject_ids))}"
@@ -153,9 +153,38 @@ class EchoDataset(BaseDataset):
             dataset, keeping shared IDs synchronized.
             Note: This is not mandatory; treat it as a sketch you can refine or replace.
         """
-        self.records = self.records.merge(other.records, on='subject_id', suffixes=('', '_other'), how='outer')
-        self.subject_ids = self.records['subject_id'].tolist()
+        self.records = self.records.merge(other.records, on="subject_id", suffixes=("", "_other"), how="outer")
+        self.subject_ids = self.records["subject_id"].tolist()
         return self
+
+
+class MultimodalDataset(BaseDataset):
+    """Example subclass for a multimodal dataset."""
+
+    def __init__(self, datasets: list[BaseDataset], *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.datasets = datasets
+        _dataset = datasets[0]
+        if not isinstance(_dataset, BaseDataset):
+            raise ValueError("All elements in datasets must be instances of BaseDataset.")
+        if len(datasets) > 1:
+            for ds in datasets[1:]:
+                if not isinstance(ds, BaseDataset):
+                    raise ValueError("All elements in datasets must be instances of BaseDataset.")
+                _dataset.__add__(ds)
+        self.dataset = _dataset
+
+    def __len__(self) -> int:
+        """Return the number of samples in the dataset."""
+        return len(self.dataset)
+
+    def __getitem__(self, idx: int):
+        """Return a single sample from the dataset."""
+        return self.dataset.__getitem__(idx)
+
+    def extra_repr(self) -> str:
+        """Return any extra information about the dataset."""
+        return self.dataset.extra_repr()
 
 
 class BaseDataLoader(DataLoader):
@@ -179,6 +208,20 @@ class BaseDataLoader(DataLoader):
         in that batch, keeping iteration simple and robust.
         Note: This is not a hard requirement. Consider it a future-facing idea you can evolve.
     """
+
+    def __init__(
+        self,
+        dataset: BaseDataset,
+        batch_size: int = 1,
+        shuffle: bool = False,
+        follow_batch: list = None,
+        exclude_keys: list = None,
+        **kwargs,
+    ):
+        super().__init__(dataset, batch_size, shuffle, follow_batch, exclude_keys, **kwargs)
+
+        # collate_fn=lambda data_list: Batch.from_data_list(
+        #    data_list, follow_batch),
 
 
 class MultimodalDataLoader(BaseDataLoader):
