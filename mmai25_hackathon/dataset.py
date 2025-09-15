@@ -15,9 +15,9 @@ Classes:
 from torch.utils.data import Dataset, Sampler
 from torch_geometric.data import DataLoader
 
+from .load_data.cxr import load_chest_xray_image, load_mimic_cxr_metadata
 from .load_data.ecg import load_ecg_record, load_mimic_iv_ecg_record_list
 from .load_data.echo import load_echo_dicom, load_mimic_iv_echo_record_list
-from .load_data.cxr import load_chest_xray_image, load_mimic_cxr_metadata
 
 __all__ = ["BaseDataset", "BaseDataLoader", "BaseSampler"]
 
@@ -120,7 +120,7 @@ class CXRDataset(BaseDataset):
             item = {"image": image, "subject_id": record_idx["subject_id"]}
             samples.append(item)
         return samples
-    
+
     def modality(self) -> str:
         """Return the modality of the dataset."""
         return "CXR"
